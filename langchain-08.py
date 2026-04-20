@@ -13,18 +13,23 @@ Agent 架构与创建
 """
 
 from typing import Any
+from typing_extensions import NotRequired
+from datetime import datetime
 
 from langchain.chat_models import init_chat_model
 from langfuse.langchain import CallbackHandler
 from langchain.agents import create_agent
 from langchain.tools import tool
-from langchain.messages import SystemMessage, HumanMessage, AIMessage
-from langchain.agents.middleware import AgentState, Runtime
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from langchain.agents.middleware import AgentState, Runtime, before_model, after_model
 from dotenv import load_dotenv
 
+# 加载环境变量与 LangFuse 追踪器
 load_dotenv()
 langfuse_handler = CallbackHandler()
 
+
+# ===================== 示例1：Agent架构深度解析 =====================
 def example_1():
     """
     示例 1：Agent 架构深度解析
@@ -67,29 +72,29 @@ def example_1():
         version="v2",
         config={"callbacks": [langfuse_handler]},
     ):
-    #
-    # 代码解释：agent.stream() 与 stream_mode="updates"
-    # =============================================
-    # agent.stream() 以流式方式逐步返回 Agent 的执行过程。
-    #
-    # stream_mode="updates" 表示每次只返回最新变化的数据，
-    # 而不是返回完整状态。这样可以看到 Agent 每一步做了什么。
-    #
-    # step 的结构：
-    # step = {
-    #     "data": {                  # 各节点的数据
-    #         "model": {             # 节点名 (model, tools, agent 等)
-    #             "messages": [AIMessage(...)]  # 该节点输出的消息
-    #         },
-    #         "tools": {
-    #             "messages": [ToolMessage(...)]
-    #         }
-    #     }
-    # }
-    #
-    # 遍历 step["data"].items() 可以获取每个节点的输出，
-    # data["messages"][-1] 取最新消息（最近一条）。
-    #
+        #
+        # 代码解释：agent.stream() 与 stream_mode="updates"
+        # =============================================
+        # agent.stream() 以流式方式逐步返回 Agent 的执行过程。
+        #
+        # stream_mode="updates" 表示每次只返回最新变化的数据，
+        # 而不是返回完整状态。这样可以看到 Agent 每一步做了什么。
+        #
+        # step 的结构：
+        # step = {
+        #     "data": {                  # 各节点的数据
+        #         "model": {             # 节点名 (model, tools, agent 等)
+        #             "messages": [AIMessage(...)]  # 该节点输出的消息
+        #         },
+        #         "tools": {
+        #             "messages": [ToolMessage(...)]
+        #         }
+        #     }
+        # }
+        #
+        # 遍历 step["data"].items() 可以获取每个节点的输出，
+        # data["messages"][-1] 取最新消息（最近一条）。
+        #
         for node, data in step["data"].items():
             if data.get("messages"):
                 msg = data["messages"][-1]
@@ -97,10 +102,12 @@ def example_1():
                 print(f"类型: {msg.type}")
                 print(f"内容: {msg.content[:150]}...")
 
-print("\n--- 最终结果 ---")
-result = agent.invoke({"messages": [("user", "计算 10 乘以 5")]}, config={"callbacks": [langfuse_handler]})
-print(f"AI: {result['messages'][-1].content}")
+    print("\n--- 最终结果 ---")
+    result = agent.invoke({"messages": [("user", "计算 10 乘以 5")]}, config={"callbacks": [langfuse_handler]})
+    print(f"AI: {result['messages'][-1].content}")
 
+
+# ===================== 示例2：create_agent参数详解 =====================
 def example_2():
     """
     示例 2: create_agent 参数详解
@@ -119,15 +126,9 @@ def example_2():
     @tool
     def get_time() -> str:
         """获取当前时间。"""
-        from datetime import datetime
-
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # 中间件
-    from langchain.agents.middleware import before_model
-    from langgraph.runtime import Runtime
-    from typing import Any
-
     @before_model
     def add_timestamp(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
         """在每条消息前添加时间戳。"""
@@ -144,23 +145,24 @@ def example_2():
         middleware=[add_timestamp],  # 中间件
         name="time_assistant",  # Agent 名称（用于多 Agent 系统）
     )
+    #
+    # 代码解释：name="time_assistant" 参数
+    # =============================================
+    # name 是 Agent 的标识符，主要用于多 Agent 系统中区分不同 Agent。
+    #
+    # 作用：
+    # 1. 日志和调试时标识是哪个 Agent 在执行
+    # 2. 在多 Agent 编排中，用于路由和引用
+    # 3. LangFuse 等追踪工具会用 name 标记 trace
+    #
+    # 如果只有一个 Agent，name 可以省略。
+    #
+    print("\n--- 测试：完整参数 Agent ---")
+    result = agent.invoke({"messages": [("user", "现在几点了?")]}, config={"callbacks": [langfuse_handler]})
+    print(f"AI: {result['messages'][-1].content}")
 
-#
-# 代码解释：name="time_assistant" 参数
-# =============================================
-# name 是 Agent 的标识符，主要用于多 Agent 系统中区分不同 Agent。
-#
-# 作用：
-# 1. 日志和调试时标识是哪个 Agent 在执行
-# 2. 在多 Agent 编排中，用于路由和引用
-# 3. LangFuse 等追踪工具会用 name 标记 trace
-#
-# 如果只有一个 Agent，name 可以省略。
-#
-print("\n--- 测试：完整参数 Agent ---")
-result = agent.invoke({"messages": [("user", "现在几点了?")]}, config={"callbacks": [langfuse_handler]})
-print(f"AI: {result['messages'][-1].content}")
 
+# ===================== 示例3：ReAct模式深度理解 =====================
 def example_3():
     """
     示例 3: ReAct 模式深度理解
@@ -209,7 +211,6 @@ def example_3():
     #     │ 执行工具调用: get_humidity("广州")   │
     #     │ → 返回: "80"                         │
     #     └──────────────────────────────────────┘
-    #
     #                      ↓
     #     ┌──────────────────────────────────────┐
     #     │ ③ Observation (观察)                 │
@@ -219,7 +220,7 @@ def example_3():
     #                      ↓
     #     ┌──────────────────────────────────────┐
     #     │ ④ 最终回答 (Answer)                  │
-    #     │ "广州目前温度 28℃, 湿度 80%, 属于闷热天气, │
+    #     │ "广州目前温度 28℃, 湿度 80%, 属于闷热天气,
     #     │ 建议减少户外活动, 注意防暑降温。"      │
     #     └──────────────────────────────────────┘
     #
@@ -317,6 +318,8 @@ def example_3():
                     #
                     print(f" ← 工具返回: {msg.content}")
 
+
+# ===================== 示例4：Agent状态管理 =====================
 def example_4():
     """
     示例 4: Agent 状态管理
@@ -330,7 +333,6 @@ def example_4():
     print("\n===== 示例 4: Agent 状态管理 =====")
 
     from langchain.agents.middleware import after_model
-    from typing_extensions import NotRequired
 
     #
     # 代码解释：CustomAgentState(AgentState) 与 NotRequired
@@ -356,7 +358,171 @@ def example_4():
     #
     # 代码解释：@after_model(state_schema=CustomAgentState)
     # =============================================
+    # @after_model 是中间件装饰器，在模型生成消息后执行。
     #
-# -----------------------------------------------------------------------------
-# 代码解释：@after_model(state_schema=CustomAgentState)
-# -----------------------------------------------------------------------------
+    # 执行时机：
+    # 模型生成消息 -> @after_model 中间件 -> 进入下一步
+    #
+    # state_schema 参数：
+    # 指定中间件使用的状态类型。
+    # 传入 CustomAgentState 后，state 参数就会有
+    # tool_call_count 和 user_preference 的类型提示。
+    #
+    # 返回值：
+    # 返回 dict -> 更新状态中的对应字段
+    # 返回 None -> 不修改状态
+    #
+    # 其他中间件装饰器：
+    # @before_model -> 模型调用前执行
+    # @after_model -> 模型调用后执行
+    # @before_tool -> 工具调用前执行
+    # @after_tool -> 工具调用后执行
+    #
+    @after_model(state_schema=CustomAgentState)
+    def track_tool_usage(state: CustomAgentState, runtime: Runtime) -> dict[str, Any] | None:
+        """统计工具调用次数。"""
+        # 计算本轮新增的工具调用
+        tool_calls = 0
+        for msg in state["messages"]:
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                tool_calls += len(msg.tool_calls)
+
+        current_count = state.get("tool_call_count", 0)
+        if tool_calls > current_count:
+            return {"tool_call_count": tool_calls}
+        return None
+
+    # 工具
+    @tool
+    def search_info(query: str) -> str:
+        """搜索信息。"""
+        return f"关于 '{query}' 的信息..."
+
+    model = init_chat_model("doubao-seed-2.0-lite", model_provider="openai", temperature=0)
+    agent = create_agent(
+        model=model, tools=[search_info], system_prompt="你是一个信息查询助手。", middleware=[track_tool_usage]
+    )
+
+    print("\n--- 测试：状态追踪 ---")
+    result = agent.invoke(
+        {"messages": [("user", "搜索 Python"), ("user", "再搜索一下 Java")]},
+        config={"callbacks": [langfuse_handler]}
+    )
+    print(f"工具调用次数: {result.get('tool_call_count', 0)}")
+    print(f"消息总数: {len(result['messages'])}")
+
+
+# ===================== 示例5：综合实战 - 研究助手Agent =====================
+def example_5():
+    """
+    示例 5: 综合实战 - 研究助手 Agent
+
+    目标：创建完整的研究助手 Agent
+    知识点：
+    - 多工具协作
+    - 状态管理
+    - 错误处理
+    - 完整的 ReAct 流程
+    """
+    print("\n===== 示例 5: 综合实战 - 研究助手 Agent =====")
+
+    # 工具 1: 文献搜索
+    @tool
+    def search_papers(topic: str, year: int = 2024) -> str:
+        """
+        搜索学术论文。
+
+        参数:
+            topic: 研究主题
+            year: 发表年份
+        """
+        return f"已找到 {year} 年关于 '{topic}' 的10篇相关论文，示例：《XXX在AI领域的应用研究》..."
+
+    # 工具 2: 数据分析
+    @tool
+    def analyze_data(metric: str, data: str) -> str:
+        """
+        分析数据指标。
+
+        参数:
+            metric: 分析指标（如 "平均值"、"最大值"）
+            data: 数据（逗号分隔的数字）
+
+        返回:
+            分析结果
+        """
+        try:
+            numbers = [float(x.strip()) for x in data.split(",")]
+            if metric == "平均值":
+                return f"平均值: {sum(numbers)/len(numbers):.2f}"
+            elif metric == "最大值":
+                return f"最大值: {max(numbers)}"
+            elif metric == "最小值":
+                return f"最小值: {min(numbers)}"
+            else:
+                return f"不支持的指标: {metric}"
+        except Exception:
+            return "数据格式错误"
+
+    # 工具 3: 生成摘要
+    @tool
+    def generate_summary(text: str, max_length: int = 100) -> str:
+        """
+        生成文本摘要。
+
+        参数:
+            text: 原文内容
+            max_length: 最大长度
+
+        返回:
+            摘要文本
+        """
+        if len(text) <= max_length:
+            return text
+        return text[:max_length] + "..."
+
+    model = init_chat_model("doubao-seed-2.0-lite", model_provider="openai", temperature=0.3, max_tokens=800)
+    agent = create_agent(
+        model=model,
+        tools=[search_papers, analyze_data, generate_summary],
+        system_prompt="""你是一个学术研究助手，可以：
+- 搜索学术论文
+- 分析实验数据
+- 生成研究摘要
+
+请根据用户需求，选择合适的工具完成研究任务。""",
+    )
+
+    # 测试场景 1: 文献搜索
+    print("\n--- 测试 1: 文献搜索 ---")
+    result1 = agent.invoke(
+        {"messages": [("user", "搜索一下 2024 年关于 AI 的论文")]},
+        config={"callbacks": [langfuse_handler]}
+    )
+    print(f"AI: {result1['messages'][-1].content}")
+
+    # 测试场景 2: 数据分析
+    print("\n--- 测试 2: 数据分析 ---")
+    result2 = agent.invoke(
+        {"messages": [("user", "帮我分析这组数据的平均值: 10, 20, 30, 40, 50")]},
+        config={"callbacks": [langfuse_handler]}
+    )
+    print(f"AI: {result2['messages'][-1].content}")
+
+
+def main(example_number: int):
+    """运行指定的示例。"""
+    print("=" * 60)
+    print("第五课: Agent 架构与创建")
+    print("=" * 60)
+
+    examples = {1: example_1, 2: example_2, 3: example_3, 4: example_4, 5: example_5}
+
+    if example_number in examples:
+        examples[example_number]()
+    else:
+        print(f"错误: 示例编号 {example_number} 不存在")
+
+
+if __name__ == "__main__":
+    main(5)
